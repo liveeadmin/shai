@@ -54,15 +54,64 @@ pub enum Message {
     PreviousCall(PreviousCall),
 }
 
-// Note: AgentTool type needs to be imported from shai_core or defined
-// For now, using a placeholder - we'll need to see what the actual tool type is
+/// Agent capability configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AgentTool {
-    // Placeholder - adjust based on actual shai_core tool definition
-    pub name: String,
-    pub description: String,
+pub struct AgentCapability {
+    #[serde(rename = "type")]
+    pub tool_type: String,  // "capability"
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub parameters: Option<serde_json::Value>,
+    pub thinking: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub internet: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub speech: Option<bool>,
+}
+
+/// OpenAI API tool configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenAiApi {
+    #[serde(rename = "type")]
+    pub tool_type: String,  // "openai"
+    pub url: String,
+    pub description: String,
+    pub model: String,
+}
+
+/// MCP tool configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpTool {
+    #[serde(rename = "type")]
+    pub tool_type: String,  // "mcp"
+    pub url: String,
+}
+
+/// Discriminated union of tool types
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type")]
+pub enum AgentTool {
+    #[serde(rename = "capability")]
+    Capability {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        thinking: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        internet: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        image: Option<bool>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        speech: Option<bool>,
+    },
+    #[serde(rename = "openai")]
+    OpenAi {
+        url: String,
+        description: String,
+        model: String,
+    },
+    #[serde(rename = "mcp")]
+    Mcp {
+        url: String,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -90,7 +90,7 @@ pub async fn handle_multimodal_query_stream(
                     Some(response) => {
                         match serde_json::to_string(&response) {
                             Ok(json) => {
-                                Some(Ok(Event::default().event("message").data(json)))
+                                Some(Ok(Event::default().data(json)))
                             }
                             Err(e) => {
                                 error!("Failed to serialize response: {}", e);
