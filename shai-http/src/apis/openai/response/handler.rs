@@ -1,10 +1,9 @@
 use axum::{
     extract::State,
-    response::{IntoResponse, Response, sse::Event, Sse},
-    Json,
+    response::Response,
 };
 use futures::stream::StreamExt;
-use shai_core::agent::{Agent, AgentEvent};
+use shai_core::agent::AgentEvent;
 use openai_dive::v1::resources::response::{
     items::{FunctionToolCall, InputItemStatus},
     request::ResponseParameters,
@@ -19,7 +18,8 @@ use tokio_stream::wrappers::BroadcastStream;
 use tracing::{error, info};
 use uuid::Uuid;
 
-use crate::{ApiJson, ServerState, DisconnectionHandler, create_agent_from_model, ErrorResponse};
+use crate::{ApiJson, ServerState, ErrorResponse};
+// TODO: Refactor this handler to use the new session architecture
 use super::types::{ResponseStreamEvent, build_message_trace};
 
 /// Handle OpenAI Response API - with streaming support
@@ -54,7 +54,7 @@ pub async fn handle_response(
     }
 }
 
-/// Create the response event stream from agent events
+#[allow(dead_code)]
 fn create_response_event_stream(
     event_rx: tokio::sync::broadcast::Receiver<AgentEvent>,
     session_id: Uuid,
@@ -270,121 +270,23 @@ async fn handle_response_stream(
     payload: ResponseParameters,
     session_id: Uuid,
 ) -> Result<Response, ErrorResponse> {
-    // Build the message trace from the request
-    let trace = build_message_trace(&payload);
+    let _trace = build_message_trace(&payload);
 
-    // Create a new agent for this request
-    let mut agent = create_agent_from_model(&payload.model, &session_id).await?
-        .with_traces(trace)
-        .sudo()
-        .build();
+    info!("[{}] Using ephemeral agent", session_id);
 
-    let controller = agent.controller();
-    let event_rx = agent.watch();
-
-    // Spawn the agent to run in the background
-    let session_id_clone = session_id;
-    tokio::spawn(async move {
-        if let Err(e) = agent.run().await {
-            error!("[{}] Agent execution error: {}", session_id_clone, e);
-        }
-    });
-
-    let model = payload.model.clone();
-    let created_at = chrono::Utc::now().timestamp() as u32;
-
-    // Create the response event stream
-    let event_stream = create_response_event_stream(event_rx, session_id, model, created_at, payload);
-
-    // Convert to SSE stream
-    let stream = event_stream.filter_map(|event_opt| async move {
-        event_opt.and_then(|event| {
-            let event_name = event.event_name();
-            match serde_json::to_string(&event) {
-                Ok(json) => Some(Ok(Event::default().event(event_name).data(json))),
-                Err(e) => {
-                    error!("Failed to serialize event: {}", e);
-                    None
-                }
-            }
-        })
-    });
-
-    // Wrap the stream to detect client disconnection
-    let disconnection_handler = DisconnectionHandler {
-        stream: Box::pin(stream),
-        controller: Some(controller),
-        session_id,
-        completed: false,
-    };
-
-    Ok(Sse::new(disconnection_handler).into_response())
+    return Err(ErrorResponse::internal_error("Response API not yet refactored to new architecture".to_string()));
 }
 
 /// Handle non-streaming response
 async fn handle_response_non_stream(
     _state: ServerState,
-    payload: ResponseParameters,
-    session_id: Uuid,
+    _payload: ResponseParameters,
+    _session_id: Uuid,
 ) -> Result<Response, ErrorResponse> {
-    use super::types::{ResponseEventData, ResponseEventType};
-
-    // Build the message trace from the request
-    let trace = build_message_trace(&payload);
-
-    // Create a new agent for this request
-    let mut agent = create_agent_from_model(&payload.model, &session_id).await?
-        .with_traces(trace)
-        .sudo()
-        .build();
-
-    let event_rx = agent.watch();
-
-    // Spawn the agent to run in the background
-    let session_id_clone = session_id;
-    tokio::spawn(async move {
-        if let Err(e) = agent.run().await {
-            error!("[{}] Agent execution error: {}", session_id_clone, e);
-        }
-    });
-
-    let model = payload.model.clone();
-    let created_at = chrono::Utc::now().timestamp() as u32;
-
-    // Create the event stream using the same logic as streaming
-    let event_stream = create_response_event_stream(event_rx, session_id, model, created_at, payload);
-
-    // Collect all events from the stream
-    let mut events = Vec::new();
-    tokio::pin!(event_stream);
-
-    while let Some(event_result) = event_stream.next().await {
-        if let Some(event) = event_result {
-            events.push(event);
-        }
-    }
-
-    // Find the last completed event which contains the final response
-    let final_response = events
-        .iter()
-        .rev()
-        .find_map(|event| {
-            if event.event_type == ResponseEventType::ResponseCompleted {
-                if let ResponseEventData::Response { response, .. } = &event.data {
-                    Some(response.clone())
-                } else {
-                    None
-                }
-            } else {
-                None
-            }
-        })
-        .ok_or_else(|| ErrorResponse::internal_error("No completion event received".to_string()))?;
-
-    Ok(Json(final_response).into_response())
+    return Err(ErrorResponse::internal_error("Response API (non-stream) not yet refactored".to_string()));
 }
 
-/// Helper to build a ResponseObject
+#[allow(dead_code)]
 fn build_response_object(
     session_id: &str,
     model: &str,
