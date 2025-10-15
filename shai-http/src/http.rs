@@ -1,5 +1,5 @@
 use axum::{
-    routing::post,
+    routing::{get, post},
     Router,
 };
 use std::sync::Arc;
@@ -71,9 +71,12 @@ pub async fn start_server(
         // Simple API
         .route("/v1/multimodal", post(apis::simple::handle_multimodal_query_stream))
         .route("/v1/multimodal/:session_id", post(apis::simple::handle_multimodal_query_stream))
-        // OpenAI-compatible APIs - TODO: refactor these
+        // OpenAI-compatible Response API
+        .route("/v1/responses", post(apis::openai::handle_response))
+        .route("/v1/responses/:response_id", get(apis::openai::handle_get_response))
+        .route("/v1/responses/:response_id/cancel", post(apis::openai::handle_cancel_response))
+        // OpenAI-compatible Chat Completion API - TODO: refactor
         // .route("/v1/chat/completions", post(apis::openai::handle_chat_completion))
-        // .route("/v1/responses", post(apis::openai::handle_response))
         .layer(CorsLayer::permissive())
         .with_state(state);
 
@@ -82,9 +85,8 @@ pub async fn start_server(
     // Print server info
     println!("Server starting on \x1b[1mhttp://{}\x1b[0m", config.address);
     println!("\nAvailable endpoints:");
-    println!("  \x1b[1mPOST /v1/chat/completions\x1b[0m    - OpenAI-compatible chat completion API");
-    println!("  \x1b[1mPOST /v1/responses\x1b[0m           - OpenAI-compatible responses API (stateless)");
-    println!("  \x1b[1mPOST /v1/multimodal\x1b[0m          - Multimodal query API (streaming)");
+    println!("  \x1b[1mPOST /v1/responses\x1b[0m                    - OpenAI Responses API");
+    println!("  \x1b[1mPOST /v1/multimodal\x1b[0m                   - Simple multimodal API");
 
     // List available agents
     use shai_core::config::agent::AgentConfig;

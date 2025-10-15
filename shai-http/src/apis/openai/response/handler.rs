@@ -1,328 +1,127 @@
 use axum::{
-    extract::State,
-    response::Response,
+    extract::{Path, State},
+    response::{IntoResponse, Response, Sse},
+    Json,
 };
-use futures::stream::StreamExt;
-use shai_core::agent::AgentEvent;
-use openai_dive::v1::resources::response::{
-    items::{FunctionToolCall, InputItemStatus},
-    request::ResponseParameters,
-    response::{
-        MessageStatus, OutputContent, OutputMessage, ReasoningStatus, ResponseObject,
-        ResponseOutput, Role,
-    },
-};
-use openai_dive::v1::resources::shared::Usage;
-use shai_llm::{ChatMessage, ChatMessageContent};
-use tokio_stream::wrappers::BroadcastStream;
-use tracing::{error, info};
+use openai_dive::v1::resources::response::request::ResponseParameters;
+use tracing::info;
 use uuid::Uuid;
 
-use crate::{ApiJson, ServerState, ErrorResponse};
-// TODO: Refactor this handler to use the new session architecture
-use super::types::{ResponseStreamEvent, build_message_trace};
+use crate::{ApiJson, ServerState, ErrorResponse, create_sse_stream};
+use super::types::build_message_trace;
+use super::formatter::ResponseFormatter;
 
-/// Handle OpenAI Response API - with streaming support
+/// POST /v1/responses - Create a model response
+/// Supports both stateful (store=true, previous_response_id) and stateless (store=false) modes
 pub async fn handle_response(
     State(state): State<ServerState>,
     ApiJson(payload): ApiJson<ResponseParameters>,
 ) -> Result<Response, ErrorResponse> {
-    let session_id = Uuid::new_v4();
+    let request_id = Uuid::new_v4();
 
-    // Log request with path
-    info!("[{}] POST /v1/responses stream={}", session_id, payload.stream.unwrap_or(false));
+    // Determine ephemeral mode based on store parameter
+    let store = payload.store.unwrap_or(true); // OpenAI defaults to true
+    let is_ephemeral = !store;
 
-    // Verify this is stateless mode
-    if payload.store.unwrap_or(false) {
-        error!("[{}] Stateful mode (store=true) not yet supported", session_id);
-        return Err(ErrorResponse::invalid_request("Stateful mode (store=true) not yet supported".to_string()));
-    }
+    // Determine session_id: use previous_response_id, or create new if store=true, or generate temp for ephemeral
+    let session_id = payload.previous_response_id.clone()
+        .unwrap_or_else(|| format!("resp_{}", Uuid::new_v4()));
 
-    if payload.previous_response_id.is_some() {
-        error!(
-            "[{}] Stateful mode (previous_response_id) not yet supported",
-            session_id
-        );
-        return Err(ErrorResponse::invalid_request("Stateful mode (previous_response_id) not yet supported".to_string()));
-    }
+    info!("[{}] POST /v1/responses session={} store={} stream={}",
+        request_id, session_id, store, payload.stream.unwrap_or(false));
 
     // Check if streaming is requested
     if payload.stream.unwrap_or(false) {
-        handle_response_stream(state, payload, session_id).await
+        handle_response_stream(state, payload, request_id, session_id, is_ephemeral).await
     } else {
-        handle_response_non_stream(state, payload, session_id).await
+        handle_response_non_stream(state, payload, request_id, session_id, is_ephemeral).await
     }
 }
 
-#[allow(dead_code)]
-fn create_response_event_stream(
-    event_rx: tokio::sync::broadcast::Receiver<AgentEvent>,
-    session_id: Uuid,
-    model: String,
-    created_at: u32,
-    payload: ResponseParameters,
-) -> impl futures::stream::Stream<Item = Option<ResponseStreamEvent>> {
-    futures::stream::unfold(
-        (BroadcastStream::new(event_rx), false, 0u32, Vec::new(), String::new()),
-        move |(mut rx, mut done, mut seq, mut output, mut accumulated_text)| {
-            let session_id_str = session_id.to_string();
-            let model = model.clone();
-            let payload = payload.clone();
-
-            async move {
-                if done {
-                    return None;
-                }
-
-                // Send initial events if sequence is 0
-                if seq == 0 {
-                    let initial_response = build_response_object(
-                        &session_id_str,
-                        &model,
-                        created_at,
-                        ReasoningStatus::InProgress,
-                        vec![],
-                        &payload,
-                    );
-
-                    let event = ResponseStreamEvent::created(seq, initial_response);
-                    seq += 1;
-
-                    return Some((Some(event), (rx, done, seq, output, accumulated_text)));
-                }
-
-                match rx.next().await {
-                    Some(result) => {
-                        match result {
-                            Ok(event) => {
-                                match event {
-                                    // Capture assistant messages from brain results
-                                    AgentEvent::BrainResult { thought, .. } => {
-                                        if let Ok(msg) = thought {
-                                            if let ChatMessage::Assistant {
-                                                content: Some(ChatMessageContent::Text(text)),
-                                                ..
-                                            } = msg
-                                            {
-                                                accumulated_text = text;
-                                            }
-                                        }
-                                        return Some((None, (rx, done, seq, output, accumulated_text)));
-                                    }
-                                    // Tool calls
-                                    AgentEvent::ToolCallStarted { call, .. } => {
-                                        info!("[{}] ToolCall: {}", session_id_str, call.tool_name);
-
-                                        let tool_output = ResponseOutput::FunctionToolCall(FunctionToolCall {
-                                            id: call.tool_call_id.clone(),
-                                            call_id: call.tool_call_id.clone(),
-                                            name: call.tool_name.clone(),
-                                            arguments: call.parameters.to_string(),
-                                            status: InputItemStatus::InProgress,
-                                        });
-
-                                        let output_index = output.len();
-                                        output.push(tool_output.clone());
-
-                                        let event = ResponseStreamEvent::output_item_added(seq, output_index, tool_output);
-                                        seq += 1;
-
-                                        return Some((Some(event), (rx, done, seq, output, accumulated_text)));
-                                    }
-                                    AgentEvent::ToolCallCompleted { call, result, .. } => {
-                                        use shai_core::tools::ToolResult;
-
-                                        let tool_status = match &result {
-                                            ToolResult::Success { .. } => {
-                                                info!("[{}] ToolResult: {} ✓", session_id_str, call.tool_name);
-                                                InputItemStatus::Completed
-                                            }
-                                            ToolResult::Error { error, .. } => {
-                                                let error_oneline = error.lines().next().unwrap_or(error);
-                                                info!("[{}] ToolResult: {} ✗ {}", session_id_str, call.tool_name, error_oneline);
-                                                InputItemStatus::Incomplete
-                                            }
-                                            ToolResult::Denied => {
-                                                info!("[{}] ToolResult: {} ⊘ Permission denied", session_id_str, call.tool_name);
-                                                InputItemStatus::Incomplete
-                                            }
-                                        };
-
-                                        // Update the tool call in output
-                                        if let Some(idx) = output.iter().position(|o| {
-                                            if let ResponseOutput::FunctionToolCall(tc) = o {
-                                                tc.id == call.tool_call_id
-                                            } else {
-                                                false
-                                            }
-                                        }) {
-                                            output[idx] = ResponseOutput::FunctionToolCall(FunctionToolCall {
-                                                id: call.tool_call_id.clone(),
-                                                call_id: call.tool_call_id.clone(),
-                                                name: call.tool_name.clone(),
-                                                arguments: call.parameters.to_string(),
-                                                status: tool_status,
-                                            });
-
-                                            let event = ResponseStreamEvent::output_item_done(seq, idx, output[idx].clone());
-                                            seq += 1;
-
-                                            return Some((Some(event), (rx, done, seq, output, accumulated_text)));
-                                        }
-
-                                        return Some((None, (rx, done, seq, output, accumulated_text)));
-                                    }
-                                    // Agent completed
-                                    AgentEvent::Completed { message, success, .. } => {
-                                        if !message.is_empty() {
-                                            accumulated_text = message;
-                                        }
-                                        info!("[{}] Completed", session_id_str);
-
-                                        // Add final message to output
-                                        let msg_output = ResponseOutput::Message(OutputMessage {
-                                            id: Uuid::new_v4().to_string(),
-                                            role: Role::Assistant,
-                                            status: MessageStatus::Completed,
-                                            content: vec![OutputContent::Text {
-                                                text: accumulated_text.clone(),
-                                                annotations: vec![],
-                                            }],
-                                        });
-                                        output.push(msg_output);
-
-                                        let final_status = if success {
-                                            ReasoningStatus::Completed
-                                        } else {
-                                            ReasoningStatus::Failed
-                                        };
-
-                                        let final_response = build_response_object(
-                                            &session_id_str,
-                                            &model,
-                                            created_at,
-                                            final_status,
-                                            output.clone(),
-                                            &payload,
-                                        );
-
-                                        let event = ResponseStreamEvent::completed(seq, final_response);
-
-                                        done = true;
-                                        return Some((Some(event), (rx, done, seq, output, accumulated_text)));
-                                    }
-                                    AgentEvent::StatusChanged { new_status, .. } => {
-                                        use shai_core::agent::PublicAgentState;
-                                        if matches!(new_status, PublicAgentState::Paused { .. }) {
-                                            info!("[{}] Paused", session_id_str);
-
-                                            // Add final message to output
-                                            let msg_output = ResponseOutput::Message(OutputMessage {
-                                                id: Uuid::new_v4().to_string(),
-                                                role: Role::Assistant,
-                                                status: MessageStatus::Completed,
-                                                content: vec![OutputContent::Text {
-                                                    text: accumulated_text.clone(),
-                                                    annotations: vec![],
-                                                }],
-                                            });
-                                            output.push(msg_output);
-
-                                            let final_response = build_response_object(
-                                                &session_id_str,
-                                                &model,
-                                                created_at,
-                                                ReasoningStatus::Incomplete,
-                                                output.clone(),
-                                                &payload,
-                                            );
-
-                                            let event = ResponseStreamEvent::completed(seq, final_response);
-
-                                            done = true;
-                                            return Some((Some(event), (rx, done, seq, output, accumulated_text)));
-                                        }
-                                        return Some((None, (rx, done, seq, output, accumulated_text)));
-                                    }
-                                    AgentEvent::Error { error } => {
-                                        error!("[{}] Agent error: {}", session_id_str, error);
-                                        return None;
-                                    }
-                                    _ => return Some((None, (rx, done, seq, output, accumulated_text))),
-                                }
-                            }
-                            Err(e) => {
-                                error!("[{}] Error in event stream: {}", session_id_str, e);
-                                return None;
-                            }
-                        }
-                    }
-                    None => None,
-                }
-            }
-        },
-    )
-}
 
 /// Handle streaming response
 async fn handle_response_stream(
-    _state: ServerState,
+    state: ServerState,
     payload: ResponseParameters,
-    session_id: Uuid,
+    request_id: Uuid,
+    session_id: String,
+    is_ephemeral: bool,
 ) -> Result<Response, ErrorResponse> {
-    let _trace = build_message_trace(&payload);
+    let trace = build_message_trace(&payload);
+    let model = payload.model.clone();
 
-    info!("[{}] Using ephemeral agent", session_id);
+    // Get or create session agent based on whether previous_response_id was provided
+    let agent_session = if payload.previous_response_id.is_some() {
+        // previous_response_id provided -> must exist, error if not
+        state.session_manager
+            .get_session(&request_id.to_string(), &session_id)
+            .await
+            .map_err(|e| ErrorResponse::invalid_request(format!("Previous response not found: {}", e)))?
+    } else {
+        // No previous_response_id -> create new session
+        state.session_manager
+            .create_new_session(&request_id.to_string(), &session_id, Some(model.clone()), is_ephemeral)
+            .await
+            .map_err(|e| ErrorResponse::internal_error(format!("Failed to create session: {}", e)))?
+    };
 
-    return Err(ErrorResponse::internal_error("Response API not yet refactored to new architecture".to_string()));
+    // Create request session
+    let request_session = agent_session
+        .handle_request(&request_id.to_string(), trace)
+        .await
+        .map_err(|e| ErrorResponse::internal_error(format!("Failed to handle request: {}", e)))?;
+
+    // Create the formatter for OpenAI Response API
+    let formatter = ResponseFormatter::new(model, payload);
+
+    // Create SSE stream
+    let stream = create_sse_stream(request_session, formatter, session_id);
+
+    Ok(Sse::new(stream).into_response())
 }
 
 /// Handle non-streaming response
 async fn handle_response_non_stream(
     _state: ServerState,
     _payload: ResponseParameters,
-    _session_id: Uuid,
+    _request_id: Uuid,
+    _session_id: String,
+    _is_ephemeral: bool,
 ) -> Result<Response, ErrorResponse> {
-    return Err(ErrorResponse::internal_error("Response API (non-stream) not yet refactored".to_string()));
+    return Err(ErrorResponse::internal_error("Response API (non-stream) not yet implemented".to_string()));
 }
 
-#[allow(dead_code)]
-fn build_response_object(
-    session_id: &str,
-    model: &str,
-    created_at: u32,
-    status: ReasoningStatus,
-    output: Vec<ResponseOutput>,
-    payload: &ResponseParameters,
-) -> ResponseObject {
-    ResponseObject {
-        id: session_id.to_string(),
-        object: "response".to_string(),
-        created_at,
-        model: model.to_string(),
-        status,
-        output,
-        instruction: payload.instructions.clone(),
-        metadata: payload.metadata.clone(),
-        temperature: payload.temperature,
-        max_output_tokens: payload.max_output_tokens,
-        parallel_tool_calls: payload.parallel_tool_calls,
-        previous_response_id: None,
-        reasoning: payload.reasoning.clone(),
-        text: payload.text.clone(),
-        tool_choice: payload.tool_choice.clone(),
-        tools: payload.tools.clone().unwrap_or_default(),
-        top_p: payload.top_p,
-        truncation: payload.truncation.clone(),
-        user: payload.user.clone(),
-        usage: Usage {
-            completion_tokens: Some(0),
-            prompt_tokens: Some(0),
-            total_tokens: 0,
-            completion_tokens_details: None,
-            prompt_tokens_details: None,
-        },
-        incomplete_details: None,
-        error: None,
-    }
+/// GET /v1/responses/{response_id} - Retrieve a model response
+pub async fn handle_get_response(
+    State(_state): State<ServerState>,
+    Path(response_id): Path<String>,
+) -> Result<Response, ErrorResponse> {
+    // TODO: Implement response retrieval
+    // This would need to:
+    // 1. Look up the session by response_id
+    // 2. Return the response state (potentially streaming from starting_after)
+    info!("GET /v1/responses/{}", response_id);
+    Err(ErrorResponse::internal_error("GET response not yet implemented".to_string()))
+}
+
+/// POST /v1/responses/{response_id}/cancel - Cancel a model response
+pub async fn handle_cancel_response(
+    State(state): State<ServerState>,
+    Path(response_id): Path<String>,
+) -> Result<Response, ErrorResponse> {
+    let request_id = Uuid::new_v4();
+    info!("[{}] POST /v1/responses/{}/cancel", request_id, response_id);
+
+    // Cancel the session
+    state.session_manager
+        .cancel_session(&request_id.to_string(), &response_id)
+        .await
+        .map_err(|e| ErrorResponse::internal_error(format!("Failed to cancel session: {}", e)))?;
+
+    // Return success response
+    Ok(Json(serde_json::json!({
+        "id": response_id,
+        "object": "response",
+        "status": "cancelled"
+    })).into_response())
 }

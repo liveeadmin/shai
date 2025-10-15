@@ -1,13 +1,11 @@
 use shai_core::agent::{Agent, AgentError};
-use shai_llm::ChatMessage;
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{error, info};
-use uuid::Uuid;
 
 use shai_core::agent::AgentBuilder;
-use super::{AgentSession, RequestSession};
+use super::AgentSession;
 
 /// Configuration for the session manager
 #[derive(Clone, Debug)]
@@ -94,19 +92,43 @@ impl SessionManager {
         Ok(session)
     }
 
-    async fn get_or_create_session(
+    /// Get an existing session by ID
+    /// Returns error if session doesn't exist
+    pub async fn get_session(
         &self,
-        http_request_id: &String,
+        http_request_id: &str,
+        session_id: &str,
+    ) -> Result<Arc<AgentSession>, AgentError> {
+        let sessions = self.sessions.lock().await;
+
+        if let Some(session) = sessions.get(session_id) {
+            info!("[{}] - [{}] Using existing session", http_request_id, session_id);
+            Ok(session.clone())
+        } else {
+            Err(AgentError::ExecutionError(format!(
+                "Session not found: {}",
+                session_id
+            )))
+        }
+    }
+
+    /// Create a new session with the given ID
+    /// Returns error if session already exists
+    pub async fn create_new_session(
+        &self,
+        http_request_id: &str,
         session_id: &str,
         agent_name: Option<String>,
         ephemeral: bool,
     ) -> Result<Arc<AgentSession>, AgentError> {
         let mut sessions = self.sessions.lock().await;
 
-        // Check if session exists
-        if let Some(session) = sessions.get(session_id) {
-            info!("[{}] - [{}] Using existing session", http_request_id, session_id);
-            return Ok(session.clone());
+        // Check if session already exists
+        if sessions.contains_key(session_id) {
+            return Err(AgentError::ExecutionError(format!(
+                "Session already exists: {}",
+                session_id
+            )));
         }
 
         // Check if creation is allowed
@@ -126,31 +148,15 @@ impl SessionManager {
             }
         }
 
-        let session = self.create_session(&http_request_id, session_id, agent_name, ephemeral).await?;
+        let session = self.create_session(&http_request_id.to_string(), session_id, agent_name, ephemeral).await?;
 
         sessions.insert(session_id.to_string(), session.clone());
         Ok(session)
     }
 
-    /// Handle an incoming request
-    /// - If `session_id` is provided, use or create that session
-    /// - If `session_id` is None, generate a new ephemeral session ID
-    pub async fn handle_request(
-        &self,
-        http_request_id: String,
-        session_id: Option<String>,
-        trace: Vec<ChatMessage>,
-        agent_name: Option<String>
-    ) -> Result<(RequestSession, String), AgentError> {
-        let session_id = session_id.unwrap_or_else(|| {
-            Uuid::new_v4().to_string()
-        });
-
-        let session = self.get_or_create_session(&http_request_id, &session_id, agent_name, self.ephemeral).await?;
-        let request_session = session.handle_request(&http_request_id, trace).await?;
-
-        // Cleanup is handled automatically by the session's own lifecycle
-        Ok((request_session, session_id))
+    /// Check if server allows persistent sessions
+    pub fn allows_persistent(&self) -> bool {
+        !self.ephemeral
     }
 
     /// Cancel a session (stop the agent)

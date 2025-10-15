@@ -18,28 +18,52 @@ pub async fn handle_multimodal_query_stream(
 ) -> Result<Response, ErrorResponse> {
     let request_id = Uuid::new_v4();
 
-    let session_id = session_id_param.map(|Path(id)| id);
+    // Determine session_id: use provided, or generate ephemeral
+    let is_ephemeral = session_id_param.is_none();
+    let session_id = session_id_param
+        .map(|Path(id)| id)
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+
     info!(
-        "[{}] POST /v1/multimodal{} model={}",
-        request_id,
-        session_id.as_ref().map(|id| format!("/{}", id)).unwrap_or_default(),
-        payload.model
+        "[{}] POST /v1/multimodal/{} model={} ephemeral={}",
+        request_id, session_id, payload.model, is_ephemeral
     );
 
-    // build trace from query 
+    // Build trace from query
     let trace = build_message_trace(&payload);
 
-    // get current session agent
-    let (request_session, actual_session_id) = state.session_manager
-        .handle_request(request_id.to_string(), session_id,  trace, Some(payload.model.clone()))
+    // Get or create session agent
+    let agent_session = if is_ephemeral {
+        // Ephemeral -> create new session
+        state.session_manager
+            .create_new_session(&request_id.to_string(), &session_id, Some(payload.model.clone()), is_ephemeral)
+            .await
+            .map_err(|e| ErrorResponse::internal_error(format!("Failed to create session: {}", e)))?
+    } else {
+        // Persistent -> get existing or create new
+        match state.session_manager.get_session(&request_id.to_string(), &session_id).await {
+            Ok(session) => session,
+            Err(_) => {
+                // Doesn't exist, create it
+                state.session_manager
+                    .create_new_session(&request_id.to_string(), &session_id, Some(payload.model.clone()), is_ephemeral)
+                    .await
+                    .map_err(|e| ErrorResponse::internal_error(format!("Failed to create session: {}", e)))?
+            }
+        }
+    };
+
+    // Create request session
+    let request_session = agent_session
+        .handle_request(&request_id.to_string(), trace)
         .await
-        .map_err(|e| ErrorResponse::internal_error(format!("Failed to handle session: {}", e)))?;
+        .map_err(|e| ErrorResponse::internal_error(format!("Failed to handle request: {}", e)))?;
 
     // Create the formatter for Simple Multimodal API
     let formatter = SimpleFormatter::new(payload.model.clone());
 
-    // Create SSE stream - pass actual_session_id so it appears in the response 'id' field
-    let stream = create_sse_stream(request_session, formatter, actual_session_id);
+    // Create SSE stream
+    let stream = create_sse_stream(request_session, formatter, session_id);
 
     Ok(Sse::new(stream).into_response())
 }
