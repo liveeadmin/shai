@@ -177,6 +177,10 @@ async fn handle_chat_completion_non_stream(
             logprobs: None,
         }],
         usage: Some(Usage {
+            input_tokens: None,
+            input_tokens_details: None,
+            output_tokens: None,
+            output_tokens_details: None,
             prompt_tokens: Some(0),
             completion_tokens: Some(0),
             total_tokens: 0,

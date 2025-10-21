@@ -73,6 +73,10 @@ impl ResponseFormatter {
             truncation: self.payload.truncation.clone(),
             user: self.payload.user.clone(),
             usage: Usage {
+                input_tokens: None,
+                input_tokens_details: None,
+                output_tokens: None,
+                output_tokens_details: None,
                 completion_tokens: Some(0),
                 prompt_tokens: Some(0),
                 total_tokens: 0,
