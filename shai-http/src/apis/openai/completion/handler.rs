@@ -62,7 +62,7 @@ async fn handle_chat_completion_stream(
     let formatter = ChatCompletionFormatter::new(model);
 
     // Create SSE stream
-    let stream = session_to_sse_stream(request_session, formatter, session_id);
+    let stream = session_to_sse_stream(request_session, formatter, session_id, true);
 
     Ok(Sse::new(stream).into_response())
 }

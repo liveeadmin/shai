@@ -69,7 +69,7 @@ async fn handle_response_stream(
     let formatter = ResponseFormatter::new(model, payload);
 
     // Create SSE stream
-    let stream = session_to_sse_stream(request_session, formatter, session_id);
+    let stream = session_to_sse_stream(request_session, formatter, session_id, true);
 
     Ok(Sse::new(stream).into_response())
 }
@@ -115,7 +115,8 @@ pub async fn handle_get_response(
     let formatter = ResponseFormatter::new(agent_session.agent_name.clone(), placeholder_payload);
 
     // Create SSE stream using the simple sse_stream (no lifecycle needed for read-only)
-    let stream = event_to_sse_stream(event_rx, formatter, response_id);
+    // stop_on_pause = false means stream stops on Completed OR Paused
+    let stream = event_to_sse_stream(event_rx, formatter, response_id, false);
 
     Ok(Sse::new(stream).into_response())
 }

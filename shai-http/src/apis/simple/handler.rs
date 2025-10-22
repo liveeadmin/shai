@@ -63,7 +63,7 @@ pub async fn handle_multimodal_query_stream(
     let formatter = SimpleFormatter::new(payload.model.clone());
 
     // Create SSE stream
-    let stream = session_to_sse_stream(request_session, formatter, session_id);
+    let stream = session_to_sse_stream(request_session, formatter, session_id, true);
 
     Ok(Sse::new(stream).into_response())
 }
