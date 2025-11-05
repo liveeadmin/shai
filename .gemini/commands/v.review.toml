@@ -1,0 +1,4 @@
+description = "Lightweight pre-commit quality sweep rooted in clarity, safety, and minimalism."
+prompt = """
+Load and execute the instructions from @.claude/commands/v.review.md
+"""

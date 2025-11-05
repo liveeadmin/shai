@@ -1,0 +1,4 @@
+description = "Automatically execute all tasks from task list in correct order, respecting dependencies, parallelization, and checkpoints."
+prompt = """
+Load and execute the instructions from @.claude/commands/v.implement.md
+"""

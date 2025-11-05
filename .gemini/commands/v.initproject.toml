@@ -1,0 +1,4 @@
+description = "Generate minimal, consistent files from _ai/memory/prd.md and initialize the project memory structure."
+prompt = """
+Load and execute the instructions from @.claude/commands/v.initproject.md
+"""

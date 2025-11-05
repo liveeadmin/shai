@@ -1,0 +1,4 @@
+description = "Make test files compile with current APIs; separate behavioral failures for later debugging."
+prompt = """
+Load and execute the instructions from @.claude/commands/v.testsync.md
+"""

@@ -1,0 +1,4 @@
+description = "Break implementation plan into specific, actionable, ordered tasks with dependencies and acceptance criteria."
+prompt = """
+Load and execute the instructions from @.claude/commands/v.tasks.md
+"""

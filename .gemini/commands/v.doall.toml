@@ -1,0 +1,4 @@
+description = "Execute all tasks automatically without stopping. Autonomous problem-solving with TDD, memory updates, and auto-commits. Fast vibe coding mode."
+prompt = """
+Load and execute the instructions from @.claude/commands/v.doall.md
+"""

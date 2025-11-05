@@ -1,0 +1,4 @@
+description = "Detect and refactor oversized source files using the 600-line hard cap policy."
+prompt = """
+Load and execute the instructions from @.claude/commands/v.shrink.md
+"""

@@ -1,0 +1,4 @@
+description = "Guide users through the framework with interactive help, command suggestions, and workflow recommendations based on current project state."
+prompt = """
+Load and execute the instructions from @.claude/commands/v.help.md
+"""

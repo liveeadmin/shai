@@ -1,0 +1,4 @@
+description = "Validate consistency and coverage across specification, plan, and tasks. Identifies gaps, conflicts, and misalignments before implementation."
+prompt = """
+Load and execute the instructions from @.claude/commands/v.analyze.md
+"""

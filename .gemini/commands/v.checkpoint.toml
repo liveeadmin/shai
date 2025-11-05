@@ -1,0 +1,4 @@
+description = "Freeze a milestone with validated code and up-to-date memory."
+prompt = """
+Load and execute the instructions from @.claude/commands/v.checkpoint.md
+"""

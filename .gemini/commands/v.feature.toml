@@ -1,0 +1,4 @@
+description = "Track and manage multiple features in Standalone mode, similar to Spec-Kit's feature tracking but with lightweight flexibility."
+prompt = """
+Load and execute the instructions from @.claude/commands/v.feature.md
+"""

@@ -1,0 +1,4 @@
+description = "Open the single entry in _ai/memory/resume.md and continue exactly where it left off."
+prompt = """
+Load and execute the instructions from @.claude/commands/v.resume.md
+"""

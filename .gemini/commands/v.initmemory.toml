@@ -1,0 +1,4 @@
+description = "Parse files from _ai/memory/legacy/ and import their content into the standard memory architecture."
+prompt = """
+Load and execute the instructions from @.claude/commands/v.initmemory.md
+"""

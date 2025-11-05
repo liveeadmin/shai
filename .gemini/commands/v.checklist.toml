@@ -1,0 +1,4 @@
+description = "Create custom quality checklists that validate requirements completeness, clarity, and consistency. Like "unit tests for English" — ensure specifications meet quality standards before implementation."
+prompt = """
+Load and execute the instructions from @.claude/commands/v.checklist.md
+"""

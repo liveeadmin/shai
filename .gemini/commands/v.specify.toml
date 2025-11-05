@@ -1,0 +1,4 @@
+description = "Create or refine feature specifications. Focus on **what** you're building and **why**, not the tech stack. Replaces `v.createprd`."
+prompt = """
+Load and execute the instructions from @.claude/commands/v.specify.md
+"""

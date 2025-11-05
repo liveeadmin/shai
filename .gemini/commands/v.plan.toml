@@ -1,0 +1,4 @@
+description = "Generate implementation plan from specification. Define **how** to build it with tech stack and architecture. Partially replaces `v.initproject`."
+prompt = """
+Load and execute the instructions from @.claude/commands/v.plan.md
+"""

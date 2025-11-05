@@ -1,0 +1,4 @@
+description = "Read plan and progress, then output the next executable step and its acceptance criteria."
+prompt = """
+Load and execute the instructions from @.claude/commands/v.next.md
+"""

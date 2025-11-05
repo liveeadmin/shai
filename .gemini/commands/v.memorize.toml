@@ -1,0 +1,4 @@
+description = "Persist today’s work to `progress.md`, keep live files slim, and make history discoverable by **Task ID** (e.g., T-010)."
+prompt = """
+Load and execute the instructions from @.claude/commands/v.memorize.md
+"""

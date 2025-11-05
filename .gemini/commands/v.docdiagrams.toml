@@ -1,0 +1,4 @@
+description = ""
+prompt = """
+Load and execute the instructions from @.claude/commands/v.docdiagrams.md
+"""

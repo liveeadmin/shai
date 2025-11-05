@@ -1,0 +1,4 @@
+description = "Enable Spec-Kit compatibility mode and bridge between vibe-coding and spec-driven workflows."
+prompt = """
+Load and execute the instructions from @.claude/commands/v.speckit.md
+"""

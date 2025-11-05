@@ -1,0 +1,4 @@
+description = "Regenerate README/QUICKSTART snippets to reflect current commands and workflow."
+prompt = """
+Load and execute the instructions from @.claude/commands/v.syncdocs.md
+"""

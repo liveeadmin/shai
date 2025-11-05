@@ -1,0 +1,4 @@
+description = "Systematically identify and resolve ambiguities, gaps, and underspecified areas in the specification before creating implementation plan. Reduces downstream rework."
+prompt = """
+Load and execute the instructions from @.claude/commands/v.clarify.md
+"""

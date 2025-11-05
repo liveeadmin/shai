@@ -1,0 +1,4 @@
+description = "Keep progress.md and plan.md slim by offloading long sections."
+prompt = """
+Load and execute the instructions from @.claude/commands/v.archive.md
+"""
